@@ -836,6 +836,41 @@
   </div>
 </div>
 
+<!-- 검사 -->
+<div class="page" id="page-lab">
+  <div style="display:flex;gap:8px;margin-bottom:16px">
+    <button class="btn-primary" style="flex:1;padding:11px" onclick="showLabSubpage('input')">📝 결과 입력</button>
+    <button class="btn-primary" style="flex:1;padding:11px;background:linear-gradient(135deg,var(--sage),#6a9a6c)" onclick="showLabSubpage('trend')">📈 추이 보기</button>
+  </div>
+
+  <!-- 입력 서브 -->
+  <div id="labSubInput">
+    <p class="section-label">검사 날짜</p>
+    <div class="card">
+      <div class="form-group" style="margin-bottom:0">
+        <input type="date" class="form-input" id="labDate">
+      </div>
+    </div>
+    <div id="labCategoryList"></div>
+    <button class="btn-primary" onclick="saveLabResult()">💾 검사 결과 저장</button>
+  </div>
+
+  <!-- 추이 서브 -->
+  <div id="labSubTrend" style="display:none">
+    <p class="section-label">항목 선택</p>
+    <div class="card">
+      <select class="form-select" id="trendItemSelect" onchange="renderTrendChart()">
+        <option value="">— 항목을 선택하세요 —</option>
+      </select>
+    </div>
+    <div class="card" id="trendChartCard" style="display:none">
+      <div id="trendChartTitle" style="font-size:0.85rem;font-weight:500;color:var(--deep);margin-bottom:12px"></div>
+      <canvas id="trendCanvas" style="width:100%;height:160px"></canvas>
+      <div id="trendTable" style="margin-top:14px"></div>
+    </div>
+  </div>
+</div>
+
 <!-- NAV -->
 <nav class="nav">
   <button class="nav-item active" onclick="showPage('home')" id="nav-home">
@@ -849,6 +884,10 @@
   <button class="nav-item" onclick="showPage('history')" id="nav-history">
     <span class="nav-icon">📋</span>
     <span class="nav-label">기록 목록</span>
+  </button>
+  <button class="nav-item" onclick="showPage('lab')" id="nav-lab">
+    <span class="nav-icon">🔬</span>
+    <span class="nav-label">검사</span>
   </button>
   <button class="nav-item" onclick="showPage('settings')" id="nav-settings">
     <span class="nav-icon">⚙️</span>
@@ -1006,6 +1045,7 @@ function showPage(name) {
   if (name === 'history') refreshHistory();
   if (name === 'settings') refreshSettings();
   if (name === 'record') initRecordForm();
+  if (name === 'lab') initLabPage();
 }
 
 // ── HOME ───────────────────────────────────────────
@@ -1356,10 +1396,385 @@ function showToast(msg) {
   setTimeout(() => t.classList.remove('show'), 2200);
 }
 
+
+// ── LAB DATA ──────────────────────────────────────
+const LAB_CATEGORIES = [
+  { id: 'metabolic', label: '대사 / 신장 / 전해질', items: [
+    { key: 'uric_acid',    label: 'Uric acid (요산)',           unit: 'mg/dL', low: 3.5,  high: 7.2 },
+    { key: 'glucose',      label: 'Glucose (혈당)',              unit: 'mg/dL', low: 70,   high: 100 },
+    { key: 'hba1c',        label: 'HbA1c (당화혈색소)',          unit: '%',     low: 0,    high: 5.7 },
+    { key: 'creatinine',   label: 'Creatinine (크레아티닌)',     unit: 'mg/dL', low: 0.6,  high: 1.2 },
+    { key: 'egfr',         label: 'eGFR (사구체여과율)',          unit: 'mL/min', low: 60,  high: 999 },
+    { key: 'bun',          label: 'BUN (혈중요소질소)',           unit: 'mg/dL', low: 7,    high: 20 },
+    { key: 'bun_cr_ratio', label: 'BUN/Creatinine ratio',       unit: '',      low: 10,   high: 20 },
+    { key: 'sodium',       label: 'Sodium 나트륨',              unit: 'mEq/L', low: 136,  high: 145 },
+    { key: 'potassium',    label: 'Potassium 칼륨',             unit: 'mEq/L', low: 3.5,  high: 5.1 },
+    { key: 'chloride',     label: 'Chloride 염소',              unit: 'mEq/L', low: 98,   high: 107 },
+    { key: 'calcium',      label: 'Calcium 칼슘',               unit: 'mg/dL', low: 8.5,  high: 10.5 },
+    { key: 'magnesium',    label: 'Magnesium 마그네슘',          unit: 'mg/dL', low: 1.7,  high: 2.3 },
+    { key: 'phosphorus',   label: 'Phosphorus 인',              unit: 'mg/dL', low: 2.5,  high: 4.5 },
+    { key: 'tco2',         label: 'TCO₂ (총 이산화탄소)',         unit: 'mEq/L', low: 22,   high: 29 },
+    { key: 'lactic_acid',  label: 'Lactic Acid',                unit: 'mmol/L',low: 0.5,  high: 2.2 },
+    { key: 'ld',           label: 'LD (Lactate Dehydrogenase)', unit: 'U/L',   low: 120,  high: 240 },
+  ]},
+  { id: 'protein', label: '단백 / 영양 / 염증', items: [
+    { key: 't_protein',  label: 'T. Protein (총단백)',     unit: 'g/dL',  low: 6.3,  high: 8.2 },
+    { key: 'albumin',    label: 'Albumin (알부민)',         unit: 'g/dL',  low: 3.5,  high: 5.0 },
+    { key: 'globulin',   label: 'Globulin (글로불린)',      unit: 'g/dL',  low: 2.0,  high: 3.5 },
+    { key: 'ag_ratio',   label: 'A/G ratio',               unit: '',      low: 1.1,  high: 2.2 },
+    { key: 'hs_crp',     label: 'hs-CRP (염증수치)',        unit: 'mg/L',  low: 0,    high: 1.0 },
+  ]},
+  { id: 'liver', label: '간 기능 / 담도', items: [
+    { key: 'ast',        label: 'AST (GOT)',               unit: 'U/L',   low: 0,    high: 40 },
+    { key: 'alt',        label: 'ALT (GPT)',               unit: 'U/L',   low: 0,    high: 41 },
+    { key: 'ggt',        label: 'GGT (감마지티)',            unit: 'U/L',   low: 0,    high: 61 },
+    { key: 'r_gtp',      label: 'r-GTP',                   unit: 'U/L',   low: 0,    high: 61 },
+    { key: 'alk_phos',   label: 'Alk. Phosphatase',        unit: 'U/L',   low: 44,   high: 147 },
+    { key: 't_bil',      label: 'T. Bil (총빌리루빈)',       unit: 'mg/dL', low: 0.2,  high: 1.2 },
+    { key: 'd_bil',      label: 'D. Bil (직접빌리루빈)',     unit: 'mg/dL', low: 0,    high: 0.3 },
+    { key: 'i_bil',      label: 'Indirect Bilirubin',      unit: 'mg/dL', low: 0.2,  high: 0.8 },
+  ]},
+  { id: 'pancreas', label: '췌장', items: [
+    { key: 'amylase',    label: 'Amylase (아밀라제)',        unit: 'U/L',   low: 28,   high: 100 },
+    { key: 'lipase',     label: 'Lipase (리파아제)',         unit: 'U/L',   low: 0,    high: 60 },
+  ]},
+  { id: 'thyroid', label: '갑상선', items: [
+    { key: 'tsh',        label: 'TSH (갑상선자극호르몬)',    unit: 'mIU/L', low: 0.4,  high: 4.0 },
+    { key: 't3',         label: 'T3 (Total)',               unit: 'ng/dL', low: 80,   high: 200 },
+    { key: 'free_t4',    label: 'Free T4',                  unit: 'ng/dL', low: 0.8,  high: 1.8 },
+  ]},
+  { id: 'hepatitis', label: '간염 바이러스', items: [
+    { key: 'hbsag',      label: 'HBsAg (B형간염 항원)',     unit: '',      low: null, high: null, text: true },
+    { key: 'anti_hbs',   label: 'Anti-HBs (B형간염 항체)', unit: '',      low: null, high: null, text: true },
+    { key: 'anti_hcv',   label: 'Anti-HCV (C형간염 항체)', unit: '',      low: null, high: null, text: true },
+  ]},
+  { id: 'tumor', label: '종양표지자', items: [
+    { key: 'ca19_9',     label: 'CA 19-9',                  unit: 'U/mL',  low: 0,    high: 37 },
+    { key: 'cea',        label: 'CEA',                      unit: 'ng/mL', low: 0,    high: 5.0 },
+  ]},
+  { id: 'cbc', label: '일반 혈액검사 (CBC)', items: [
+    { key: 'wbc',        label: 'WBC (백혈구)',              unit: '10³/μL',low: 4.0,  high: 10.0 },
+    { key: 'rbc',        label: 'RBC (적혈구)',              unit: '10⁶/μL',low: 4.0,  high: 5.5 },
+    { key: 'hb',         label: 'Hb (혈색소)',               unit: 'g/dL',  low: 12.0, high: 16.0 },
+    { key: 'hct',        label: 'Hct (헤마토크리트)',         unit: '%',     low: 37,   high: 47 },
+    { key: 'mcv',        label: 'MCV',                      unit: 'fL',    low: 80,   high: 100 },
+    { key: 'mch',        label: 'MCH',                      unit: 'pg',    low: 27,   high: 33 },
+    { key: 'mchc',       label: 'MCHC',                     unit: 'g/dL',  low: 32,   high: 36 },
+    { key: 'rdw',        label: 'RDW',                      unit: '%',     low: 11.5, high: 14.5 },
+    { key: 'platelet',   label: 'Platelet (혈소판수)',        unit: '10³/μL',low: 150,  high: 400 },
+    { key: 'mpv',        label: 'MPV (혈소판용적)',           unit: 'fL',    low: 7.5,  high: 12.5 },
+    { key: 'pdw',        label: 'PDW (혈소판분포)',           unit: '%',     low: 9,    high: 17 },
+    { key: 'pct',        label: 'PCT (혈소판용적비)',         unit: '%',     low: 0.1,  high: 0.5 },
+    { key: 'esr',        label: 'ESR (적혈구침강속도)',        unit: 'mm/h',  low: 0,    high: 20 },
+  ]},
+  { id: 'diff', label: '백혈구 분획 / 미성숙 세포', items: [
+    { key: 'promyelocyte',   label: 'Promyelocyte (전골수구)',        unit: '%', low: 0, high: 0 },
+    { key: 'myelocyte',      label: 'Myelocyte (골수구)',             unit: '%', low: 0, high: 0 },
+    { key: 'metamyelocyte',  label: 'Metamyelocyte (후골수구)',       unit: '%', low: 0, high: 0 },
+    { key: 'band_neutro',    label: 'Band Neutrophil',               unit: '%', low: 0, high: 5 },
+    { key: 'seg_neutro',     label: 'Segmented Neutrophil',          unit: '',  low: null, high: null },
+    { key: 'seg_neutro_pct', label: 'Segmented Neutrophil %',        unit: '%', low: 50,   high: 70 },
+    { key: 'lymphocyte',     label: 'Lymphocyte (림프구)',            unit: '%', low: 20,   high: 40 },
+    { key: 'monocyte',       label: 'Monocyte (단핵구)',              unit: '%', low: 2,    high: 8 },
+    { key: 'basophil',       label: 'Basophil (호염구)',              unit: '%', low: 0,    high: 1 },
+    { key: 'atypical_lymph', label: 'Atypical Lymphocyte',           unit: '%', low: 0,    high: 0 },
+    { key: 'immature_cell',  label: 'Immature cell (미성숙 세포)',     unit: '%', low: 0,    high: 0 },
+    { key: 'plasma_cell',    label: 'Plasma Cell (형질세포)',          unit: '%', low: 0,    high: 0 },
+    { key: 'blast',          label: 'Blast (아구)',                   unit: '%', low: 0,    high: 0 },
+    { key: 'nrbc',           label: 'Nucleated RBC (핵적혈구)',        unit: '',  low: null, high: null },
+    { key: 'anc',            label: 'ANC (절대호중구수)',              unit: '10³/μL', low: 1.5, high: 8.0 },
+    { key: 'alc',            label: 'ALC (절대림프구수)',              unit: '10³/μL', low: 1.0, high: 4.8 },
+    { key: 'abs_mono',       label: 'Absolute Monocyte Count',       unit: '10³/μL', low: 0.2, high: 1.0 },
+    { key: 'abnormal_lymph', label: 'Abnormal Lymphoid cell',        unit: '',  low: null, high: null },
+  ]},
+  { id: 'coag', label: '응고 검사', items: [
+    { key: 'pt_sec',     label: 'PT sec',                   unit: 'sec',   low: 11,   high: 13 },
+    { key: 'pt_pct',     label: 'PT %',                     unit: '%',     low: 70,   high: 130 },
+    { key: 'pt_inr',     label: 'PT INR',                   unit: '',      low: 0.8,  high: 1.2 },
+    { key: 'aptt',       label: 'aPTT',                     unit: 'sec',   low: 25,   high: 35 },
+    { key: 'fibrinogen', label: 'Fibrinogen (섬유소원)',     unit: 'mg/dL', low: 200,  high: 400 },
+  ]},
+  { id: 'blood_type', label: '혈액형', items: [
+    { key: 'abo',        label: 'ABO 혈액형',                unit: '',      low: null, high: null, text: true },
+    { key: 'rh_d',       label: 'Rh D',                     unit: '',      low: null, high: null, text: true },
+  ]},
+];
+
+// labResults: [{date, values: {key: val, ...}}]
+let labResults = [];
+
+async function saveLabToStorage() {
+  try {
+    await window.storage.set('chemo-lab', JSON.stringify(labResults));
+  } catch(e) {
+    localStorage.setItem('chemo-lab', JSON.stringify(labResults));
+  }
+}
+
+async function loadLabFromStorage() {
+  try {
+    const r = await window.storage.get('chemo-lab');
+    if (r) labResults = JSON.parse(r.value);
+  } catch(e) {
+    const r = localStorage.getItem('chemo-lab');
+    if (r) labResults = JSON.parse(r);
+  }
+}
+
+function getItemDef(key) {
+  for (const cat of LAB_CATEGORIES) {
+    const item = cat.items.find(i => i.key === key);
+    if (item) return item;
+  }
+  return null;
+}
+
+function flagValue(val, item) {
+  if (!item || item.text || item.low === null) return 'normal';
+  const v = parseFloat(val);
+  if (isNaN(v)) return 'normal';
+  if (v < item.low) return 'low';
+  if (v > item.high) return 'high';
+  return 'normal';
+}
+
+// ── LAB PAGE ──────────────────────────────────────
+function initLabPage() {
+  document.getElementById('labDate').value = today();
+  renderLabCategories();
+  renderTrendSelect();
+  showLabSubpage('input');
+}
+
+function showLabSubpage(sub) {
+  document.getElementById('labSubInput').style.display = sub === 'input' ? 'block' : 'none';
+  document.getElementById('labSubTrend').style.display = sub === 'trend' ? 'block' : 'none';
+}
+
+function renderLabCategories() {
+  const date = document.getElementById('labDate').value;
+  const existing = labResults.find(r => r.date === date) || { values: {} };
+
+  const container = document.getElementById('labCategoryList');
+  container.innerHTML = LAB_CATEGORIES.map(cat => `
+    <div class="card" style="margin-bottom:12px;padding:0;overflow:hidden">
+      <div onclick="toggleLabCat('${cat.id}')"
+        style="padding:14px 16px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;background:var(--warm-white)">
+        <span style="font-size:0.88rem;font-weight:500;color:var(--deep)">${cat.label}</span>
+        <span id="labCatArrow_${cat.id}" style="color:var(--text-light);transition:transform 0.2s">▾</span>
+      </div>
+      <div id="labCat_${cat.id}" style="display:none;padding:12px 14px 14px;border-top:1px solid var(--border)">
+        ${cat.items.map(item => {
+          const val = existing.values[item.key] || '';
+          const flag = flagValue(val, item);
+          const flagColor = flag === 'high' ? '#e05555' : flag === 'low' ? '#4a7fc1' : 'var(--text-light)';
+          return `
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <div style="flex:1;font-size:0.78rem;color:var(--text);line-height:1.3">${item.label}</div>
+            <input type="${item.text ? 'text' : 'number'}" step="any"
+              id="lab_${item.key}"
+              value="${val}"
+              placeholder="${item.text ? '결과 입력' : item.unit}"
+              style="width:90px;padding:7px 8px;border:1.5px solid var(--border);border-radius:8px;font-size:0.8rem;text-align:right;background:var(--warm-white);color:var(--text);font-family:'Noto Sans KR',sans-serif;outline:none"
+              onfocus="this.style.borderColor='var(--terracotta)'"
+              onblur="this.style.borderColor='var(--border)';updateLabFlag(this,'${item.key}')">
+            <div style="min-width:32px;font-size:0.68rem;color:var(--text-light);text-align:right">${item.unit}</div>
+            <div id="labflag_${item.key}" style="min-width:16px;font-size:0.75rem;color:${flagColor};font-weight:600">${flag==='high'?'↑':flag==='low'?'↓':''}</div>
+          </div>`;
+        }).join('')}
+        ${cat.items.some(i => i.low !== null && !i.text) ? `
+        <div style="margin-top:6px;font-size:0.67rem;color:var(--text-light);line-height:1.5">
+          <span style="color:#e05555">↑ 정상 상한 초과</span> &nbsp;·&nbsp; <span style="color:#4a7fc1">↓ 정상 하한 미만</span>
+        </div>` : ''}
+      </div>
+    </div>`).join('');
+}
+
+function toggleLabCat(id) {
+  const el = document.getElementById('labCat_' + id);
+  const arrow = document.getElementById('labCatArrow_' + id);
+  const open = el.style.display !== 'none';
+  el.style.display = open ? 'none' : 'block';
+  arrow.style.transform = open ? '' : 'rotate(180deg)';
+}
+
+function updateLabFlag(input, key) {
+  const item = getItemDef(key);
+  const flag = flagValue(input.value, item);
+  const flagEl = document.getElementById('labflag_' + key);
+  if (!flagEl) return;
+  if (flag === 'high') { flagEl.textContent = '↑'; flagEl.style.color = '#e05555'; }
+  else if (flag === 'low') { flagEl.textContent = '↓'; flagEl.style.color = '#4a7fc1'; }
+  else { flagEl.textContent = ''; flagEl.style.color = 'var(--text-light)'; }
+}
+
+async function saveLabResult() {
+  const date = document.getElementById('labDate').value;
+  if (!date) { showToast('날짜를 선택해 주세요'); return; }
+
+  const values = {};
+  LAB_CATEGORIES.forEach(cat => {
+    cat.items.forEach(item => {
+      const el = document.getElementById('lab_' + item.key);
+      if (el && el.value.trim()) values[item.key] = el.value.trim();
+    });
+  });
+
+  if (!Object.keys(values).length) { showToast('입력된 값이 없어요'); return; }
+
+  labResults = labResults.filter(r => r.date !== date);
+  labResults.push({ date, values });
+  labResults.sort((a, b) => b.date.localeCompare(a.date));
+
+  await saveLabToStorage();
+  showToast('✅ 검사 결과가 저장됐어요!');
+}
+
+// ── TREND CHART ────────────────────────────────────
+function renderTrendSelect() {
+  const sel = document.getElementById('trendItemSelect');
+  sel.innerHTML = '<option value="">— 항목을 선택하세요 —</option>';
+  LAB_CATEGORIES.forEach(cat => {
+    const grp = document.createElement('optgroup');
+    grp.label = cat.label;
+    cat.items.forEach(item => {
+      if (item.text) return;
+      const opt = document.createElement('option');
+      opt.value = item.key;
+      opt.textContent = item.label;
+      grp.appendChild(opt);
+    });
+    sel.appendChild(grp);
+  });
+}
+
+function renderTrendChart() {
+  const key = document.getElementById('trendItemSelect').value;
+  const card = document.getElementById('trendChartCard');
+  if (!key) { card.style.display = 'none'; return; }
+
+  const item = getItemDef(key);
+  const data = labResults
+    .filter(r => r.values[key] !== undefined && r.values[key] !== '')
+    .map(r => ({ date: r.date, val: parseFloat(r.values[key]) }))
+    .filter(d => !isNaN(d.val))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  card.style.display = 'block';
+  document.getElementById('trendChartTitle').textContent =
+    `${item.label} ${item.unit ? '(' + item.unit + ')' : ''}`;
+
+  // Draw canvas chart
+  const canvas = document.getElementById('trendCanvas');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.offsetWidth || 300;
+  const H = 160;
+  canvas.width = W * window.devicePixelRatio;
+  canvas.height = H * window.devicePixelRatio;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+  ctx.clearRect(0, 0, W, H);
+
+  if (data.length < 1) {
+    ctx.fillStyle = '#7a6255';
+    ctx.font = '13px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('데이터가 없어요', W/2, H/2);
+    document.getElementById('trendTable').innerHTML = '';
+    return;
+  }
+
+  const pad = { l: 10, r: 10, t: 16, b: 28 };
+  const vals = data.map(d => d.val);
+  const allVals = [...vals];
+  if (item.low !== null) { allVals.push(item.low, item.high); }
+  const minV = Math.min(...allVals) * 0.9;
+  const maxV = Math.max(...allVals) * 1.1;
+  const rangeV = maxV - minV || 1;
+
+  const xStep = data.length > 1 ? (W - pad.l - pad.r) / (data.length - 1) : 0;
+  const toX = i => pad.l + i * xStep;
+  const toY = v => pad.t + (1 - (v - minV) / rangeV) * (H - pad.t - pad.b);
+
+  // Reference range band
+  if (item.low !== null) {
+    ctx.fillStyle = 'rgba(138,170,140,0.1)';
+    const bandTop = toY(item.high);
+    const bandBot = toY(item.low);
+    ctx.fillRect(pad.l, bandTop, W - pad.l - pad.r, bandBot - bandTop);
+    ctx.strokeStyle = 'rgba(138,170,140,0.4)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath(); ctx.moveTo(pad.l, bandTop); ctx.lineTo(W - pad.r, bandTop); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(pad.l, bandBot); ctx.lineTo(W - pad.r, bandBot); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // Line
+  ctx.strokeStyle = '#c97b5a';
+  ctx.lineWidth = 2;
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  data.forEach((d, i) => {
+    i === 0 ? ctx.moveTo(toX(i), toY(d.val)) : ctx.lineTo(toX(i), toY(d.val));
+  });
+  ctx.stroke();
+
+  // Dots & values
+  data.forEach((d, i) => {
+    const flag = flagValue(d.val, item);
+    ctx.fillStyle = flag === 'high' ? '#e05555' : flag === 'low' ? '#4a7fc1' : '#c97b5a';
+    ctx.beginPath();
+    ctx.arc(toX(i), toY(d.val), 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // value label
+    ctx.fillStyle = flag === 'high' ? '#e05555' : flag === 'low' ? '#4a7fc1' : '#4a3728';
+    ctx.font = `bold 10px 'Noto Sans KR', sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(d.val, toX(i), toY(d.val) - 7);
+
+    // date label
+    const d2 = new Date(d.date);
+    ctx.fillStyle = '#7a6255';
+    ctx.font = '9px sans-serif';
+    ctx.fillText(`${d2.getMonth()+1}/${d2.getDate()}`, toX(i), H - pad.b + 12);
+  });
+
+  // Table
+  const tableRows = [...data].reverse().map(d => {
+    const flag = flagValue(d.val, item);
+    const flagHtml = flag === 'high'
+      ? '<span style="color:#e05555;font-weight:600">↑ 높음</span>'
+      : flag === 'low'
+      ? '<span style="color:#4a7fc1;font-weight:600">↓ 낮음</span>'
+      : '<span style="color:var(--sage)">정상</span>';
+    const dt = new Date(d.date);
+    return `<tr>
+      <td style="padding:6px 4px;font-size:0.78rem;color:var(--text-light)">${dt.getMonth()+1}월 ${dt.getDate()}일</td>
+      <td style="padding:6px 4px;font-size:0.88rem;font-weight:500;color:var(--deep);text-align:right">${d.val} <span style="font-size:0.7rem;color:var(--text-light)">${item.unit}</span></td>
+      <td style="padding:6px 4px;font-size:0.78rem;text-align:right">${flagHtml}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('trendTable').innerHTML = `
+    <table style="width:100%;border-collapse:collapse;border-top:1px solid var(--border)">
+      <thead><tr>
+        <th style="padding:6px 4px;font-size:0.72rem;color:var(--text-light);font-weight:500;text-align:left">날짜</th>
+        <th style="padding:6px 4px;font-size:0.72rem;color:var(--text-light);font-weight:500;text-align:right">수치</th>
+        <th style="padding:6px 4px;font-size:0.72rem;color:var(--text-light);font-weight:500;text-align:right">판정</th>
+      </tr></thead>
+      <tbody>${tableRows}</tbody>
+    </table>
+    ${item.low !== null ? `<div style="margin-top:8px;font-size:0.7rem;color:var(--text-light)">정상범위: ${item.low} ~ ${item.high} ${item.unit} &nbsp;·&nbsp; <span style="color:rgba(138,170,140,0.8)">■</span> 초록 띠 구간</div>` : ''}`;
+}
+
+
 // ── INIT ───────────────────────────────────────────
 (async () => {
   await loadFromStorage();
-  // set default date
+  await loadLabFromStorage();
   document.getElementById('recDate').value = today();
   refreshHome();
 })();
