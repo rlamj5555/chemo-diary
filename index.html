@@ -638,6 +638,16 @@
       <span id="heroCycle">--</span>차 항암 치료 중
     </div>
     <div class="today-since" id="heroSince">치료 시작일을 설정해 주세요</div>
+    <div id="heroBadges" style="display:none;margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+      <div style="background:rgba(255,255,255,0.6);border-radius:10px;padding:7px 12px;flex:1;min-width:120px">
+        <div style="font-size:0.65rem;color:var(--text-light);margin-bottom:2px">🌱 항암 시작한지</div>
+        <div style="font-size:1rem;font-weight:600;color:var(--deep);font-family:'Noto Serif KR',serif"><span id="heroTotalDays">--</span><span style="font-size:0.72rem;font-weight:400;color:var(--text-light)"> 일째</span></div>
+      </div>
+      <div style="background:rgba(255,255,255,0.6);border-radius:10px;padding:7px 12px;flex:1;min-width:120px">
+        <div style="font-size:0.65rem;color:var(--text-light);margin-bottom:2px" id="heroCycleLabel">🔄 N차 시작한지</div>
+        <div style="font-size:1rem;font-weight:600;color:var(--deep);font-family:'Noto Serif KR',serif"><span id="heroDayInCycle">--</span><span style="font-size:0.72rem;font-weight:400;color:var(--text-light)"> 일째</span></div>
+      </div>
+    </div>
     <div class="cycle-progress">
       <div class="progress-header">
         <span>이번 사이클 진행률</span>
@@ -778,25 +788,25 @@
 
 <!-- 설정 -->
 <div class="page" id="page-settings">
-  <p class="section-label">치료 설정</p>
+  <p class="section-label">기본 설정</p>
   <div class="card">
     <div class="form-group">
-      <label class="form-label">치료 시작일</label>
-      <input type="date" class="form-input" id="settingStart">
-    </div>
-    <div class="form-group">
-      <label class="form-label">사이클 간격 (일)</label>
-      <input type="number" class="form-input" id="settingCycleLen" value="21" min="1" max="42" placeholder="21">
+      <label class="form-label">치료명 (선택)</label>
+      <input type="text" class="form-input" id="settingTreatmentName" placeholder="예: AC-T, FOLFOX...">
     </div>
     <div class="form-group">
       <label class="form-label">총 사이클 수</label>
       <input type="number" class="form-input" id="settingTotalCycles" value="6" min="1" max="30" placeholder="6">
     </div>
-    <div class="form-group">
-      <label class="form-label">치료명 (선택)</label>
-      <input type="text" class="form-input" id="settingTreatmentName" placeholder="예: AC-T, FOLFOX...">
-    </div>
-    <button class="btn-primary" onclick="saveSettings()">저장</button>
+    <button class="btn-primary" onclick="saveBasicSettings()">저장</button>
+  </div>
+
+  <p class="section-label" style="margin-top:10px">🗓️ 사이클별 시작일</p>
+  <div class="card">
+    <p style="font-size:0.78rem;color:var(--text-light);margin-bottom:14px;line-height:1.6">각 사이클이 실제로 시작된 날짜를 입력해 주세요.<br>병원 사정으로 일정이 바뀌어도 정확하게 계산돼요.</p>
+    <div id="cycleInputList"></div>
+    <button class="btn-secondary" style="margin-top:10px" onclick="addCycleInput()">+ 사이클 추가</button>
+    <button class="btn-primary" style="margin-top:10px" onclick="saveCycleDates()">사이클 날짜 저장</button>
   </div>
 
   <p class="section-label" style="margin-top:10px">현재 정보</p>
@@ -806,7 +816,7 @@
       <span class="setting-value" id="infoProtocol">미설정</span>
     </div>
     <div class="setting-row">
-      <span class="setting-name">치료 시작일</span>
+      <span class="setting-name">1차 시작일</span>
       <span class="setting-value" id="infoStart">미설정</span>
     </div>
     <div class="setting-row">
@@ -889,8 +899,7 @@
 <script>
 // ── STATE ──────────────────────────────────────────
 let settings = {
-  startDate: null,
-  cycleLen: 21,
+  cycleDates: [],   // ['2025-01-01', '2025-01-22', ...] 각 사이클 시작일
   totalCycles: 6,
   treatmentName: ''
 };
@@ -924,26 +933,51 @@ async function loadFromStorage() {
   }
 }
 
-// ── CYCLE LOGIC ────────────────────────────────────
+// ── CYCLE LOGIC (날짜 직접 입력 방식) ─────────────
+function getSortedCycleDates() {
+  // settings.cycleDates: ['2025-01-01', '2025-01-22', ...] 오름차순
+  if (!settings.cycleDates || !settings.cycleDates.length) return [];
+  return [...settings.cycleDates].sort((a, b) => a.localeCompare(b));
+}
+
 function getCurrentCycle() {
-  if (!settings.startDate) return { cycle: null, dayInCycle: 0, progress: 0 };
-  const start = new Date(settings.startDate);
-  const today = new Date();
-  const diff = Math.floor((today - start) / 86400000);
-  if (diff < 0) return { cycle: 1, dayInCycle: 0, progress: 0 };
-  const cycle = Math.floor(diff / settings.cycleLen) + 1;
-  const dayInCycle = (diff % settings.cycleLen) + 1;
-  const progress = Math.round((dayInCycle / settings.cycleLen) * 100);
-  return { cycle, dayInCycle, progress, totalDays: diff + 1 };
+  const dates = getSortedCycleDates();
+  if (!dates.length) return { cycle: null, dayInCycle: 0, progress: 0, totalDays: 0 };
+
+  const todayStr = today();
+  const todayDate = new Date(todayStr);
+  const firstDate = new Date(dates[0]);
+  const totalDays = Math.floor((todayDate - firstDate) / 86400000) + 1;
+
+  // 오늘 날짜 기준으로 현재 몇 차인지 찾기
+  let cycle = 1;
+  for (let i = 0; i < dates.length; i++) {
+    if (todayStr >= dates[i]) cycle = i + 1;
+    else break;
+  }
+
+  const cycleStartDate = new Date(dates[cycle - 1]);
+  const dayInCycle = Math.floor((todayDate - cycleStartDate) / 86400000) + 1;
+
+  // 진행률: 다음 사이클 날짜가 있으면 그걸로, 없으면 21일 기본값
+  let cycleLen = 21;
+  if (dates[cycle]) {
+    cycleLen = Math.floor((new Date(dates[cycle]) - cycleStartDate) / 86400000);
+  }
+  const progress = Math.min(100, Math.round((dayInCycle / cycleLen) * 100));
+
+  return { cycle, dayInCycle, progress, totalDays, cycleLen };
 }
 
 function getCycleForDate(dateStr) {
-  if (!settings.startDate) return '--';
-  const start = new Date(settings.startDate);
-  const target = new Date(dateStr);
-  const diff = Math.floor((target - start) / 86400000);
-  if (diff < 0) return 1;
-  return Math.floor(diff / settings.cycleLen) + 1;
+  const dates = getSortedCycleDates();
+  if (!dates.length) return '--';
+  let cycle = 1;
+  for (let i = 0; i < dates.length; i++) {
+    if (dateStr >= dates[i]) cycle = i + 1;
+    else break;
+  }
+  return cycle;
 }
 
 // ── DATE UTILS ─────────────────────────────────────
@@ -988,12 +1022,18 @@ function refreshHome() {
   document.getElementById('headerCycle').textContent = cycle ? `${cycle}` : '--';
 
   if (cycle) {
+    const totalCycles = settings.totalCycles || '?';
     document.getElementById('heroSince').textContent =
-      `치료 시작 ${totalDays}일째 · 이번 사이클 ${dayInCycle}일차`;
+      `${settings.treatmentName || '항암 치료'} · 총 ${totalCycles}차 중`;
     document.getElementById('progressPct').textContent = `${progress}%`;
     document.getElementById('progressFill').style.width = `${progress}%`;
+    document.getElementById('heroBadges').style.display = 'flex';
+    document.getElementById('heroTotalDays').textContent = totalDays;
+    document.getElementById('heroCycleLabel').textContent = `🔄 ${cycle}차 시작한지`;
+    document.getElementById('heroDayInCycle').textContent = dayInCycle;
   } else {
-    document.getElementById('heroSince').textContent = '설정에서 치료 시작일을 입력해 주세요';
+    document.getElementById('heroSince').textContent = '설정 탭에서 사이클 날짜를 입력해 주세요';
+    document.getElementById('heroBadges').style.display = 'none';
   }
 
   // last vitals
@@ -1185,27 +1225,66 @@ function refreshHistory() {
 }
 
 // ── SETTINGS ──────────────────────────────────────
-function refreshSettings() {
-  document.getElementById('settingStart').value = settings.startDate || '';
-  document.getElementById('settingCycleLen').value = settings.cycleLen;
-  document.getElementById('settingTotalCycles').value = settings.totalCycles;
-  document.getElementById('settingTreatmentName').value = settings.treatmentName || '';
+function renderCycleInputList() {
+  const dates = getSortedCycleDates();
+  const list = document.getElementById('cycleInputList');
+  if (!list) return;
 
-  const { cycle, totalDays } = getCurrentCycle();
-  document.getElementById('infoProtocol').textContent = settings.treatmentName || '미설정';
-  document.getElementById('infoStart').textContent = settings.startDate ? formatDate(settings.startDate) : '미설정';
-  document.getElementById('infoCycle').textContent = cycle ? `${cycle}차 / ${settings.totalCycles}차` : '--';
-  document.getElementById('infoDays').textContent = totalDays ? `${totalDays}일` : '--';
+  const rows = dates.length ? dates : [''];
+  list.innerHTML = rows.map((d, i) => `
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+      <div style="min-width:52px;font-size:0.78rem;color:var(--terracotta);font-weight:600">${i+1}차</div>
+      <input type="date" class="form-input" style="flex:1;margin:0" value="${d}"
+        oninput="updateCycleDate(${i}, this.value)" id="cycleDate_${i}">
+      ${i > 0 ? `<div onclick="removeCycleDate(${i})" style="cursor:pointer;color:var(--text-light);font-size:1rem;padding:4px">✕</div>` : '<div style="width:24px"></div>'}
+    </div>`).join('');
 }
 
-async function saveSettings() {
-  settings.startDate = document.getElementById('settingStart').value;
-  settings.cycleLen = parseInt(document.getElementById('settingCycleLen').value) || 21;
+function updateCycleDate(idx, val) {
+  if (!settings.cycleDates) settings.cycleDates = [];
+  settings.cycleDates[idx] = val;
+}
+
+function addCycleInput() {
+  if (!settings.cycleDates) settings.cycleDates = [];
+  settings.cycleDates.push('');
+  renderCycleInputList();
+}
+
+function removeCycleDate(idx) {
+  settings.cycleDates.splice(idx, 1);
+  renderCycleInputList();
+}
+
+async function saveCycleDates() {
+  // collect from DOM
+  const list = document.getElementById('cycleInputList');
+  const inputs = list.querySelectorAll('input[type=date]');
+  settings.cycleDates = [...inputs].map(i => i.value).filter(v => v);
+  await saveToStorage();
+  refreshSettings();
+  showToast('✅ 사이클 날짜가 저장됐어요!');
+}
+
+async function saveBasicSettings() {
   settings.totalCycles = parseInt(document.getElementById('settingTotalCycles').value) || 6;
   settings.treatmentName = document.getElementById('settingTreatmentName').value.trim();
   await saveToStorage();
   refreshSettings();
   showToast('✅ 설정이 저장됐어요!');
+}
+
+function refreshSettings() {
+  document.getElementById('settingTreatmentName').value = settings.treatmentName || '';
+  document.getElementById('settingTotalCycles').value = settings.totalCycles || 6;
+  renderCycleInputList();
+
+  const dates = getSortedCycleDates();
+  const { cycle, totalDays } = getCurrentCycle();
+  document.getElementById('infoProtocol').textContent = settings.treatmentName || '미설정';
+  document.getElementById('infoStart').textContent = dates.length ? formatDate(dates[0]) : '미설정';
+  document.getElementById('infoCycle').textContent = cycle ? `${cycle}차 / ${settings.totalCycles || '--'}차` : '--';
+  document.getElementById('infoDays').textContent = totalDays ? `${totalDays}일` : '--';
 }
 
 function exportData() {
@@ -1229,26 +1308,34 @@ function openCycleModal() {
   const { cycle, dayInCycle, progress, totalDays } = getCurrentCycle();
   const content = document.getElementById('cycleModalContent');
 
-  if (!settings.startDate) {
-    content.innerHTML = `<p style="color:var(--text-light);font-size:0.88rem;line-height:1.7">설정에서 치료 시작일과 사이클 정보를 입력하면 현재 몇 차 진행 중인지 자동으로 계산해 드려요 🌿</p>`;
+  const dates = getSortedCycleDates();
+  if (!dates.length) {
+    content.innerHTML = `<p style="color:var(--text-light);font-size:0.88rem;line-height:1.7">설정에서 각 사이클 시작일을 입력하면 현재 몇 차 진행 중인지 자동으로 계산해 드려요 🌿</p>`;
   } else {
-    const nextDate = new Date(settings.startDate);
-    nextDate.setDate(nextDate.getDate() + (cycle) * settings.cycleLen);
-    const remainDays = settings.cycleLen - dayInCycle;
+    const totalCycles = settings.totalCycles || dates.length;
+    const completePct = Math.round(((cycle - 1) / totalCycles) * 100);
+
+    // next cycle info
+    let nextInfo = '마지막 사이클 진행 중';
+    if (dates[cycle]) {
+      const remainDays = Math.floor((new Date(dates[cycle]) - new Date(today())) / 86400000);
+      nextInfo = remainDays > 0 ? `${remainDays}일 후 (${formatDate(dates[cycle])})` : '곧 시작';
+    }
 
     content.innerHTML = `
       <div style="text-align:center;padding:10px 0 20px">
         <div style="font-family:'Noto Serif KR',serif;font-size:3rem;font-weight:600;color:var(--terracotta)">${cycle}차</div>
         <div style="font-size:0.85rem;color:var(--text-light);margin-top:4px">${settings.treatmentName || '항암 치료'} 진행 중</div>
       </div>
-      <div class="setting-row"><span class="setting-name">치료 시작</span><span class="setting-value">${formatDate(settings.startDate)}</span></div>
+      <div class="setting-row"><span class="setting-name">1차 시작일</span><span class="setting-value">${formatDate(dates[0])}</span></div>
       <div class="setting-row"><span class="setting-name">총 경과일</span><span class="setting-value">${totalDays}일째</span></div>
-      <div class="setting-row"><span class="setting-name">이번 사이클</span><span class="setting-value">${dayInCycle}일 / ${settings.cycleLen}일</span></div>
-      <div class="setting-row"><span class="setting-name">다음 사이클까지</span><span class="setting-value">${remainDays}일 후</span></div>
-      <div class="setting-row"><span class="setting-name">전체 진행률</span><span class="setting-value">${cycle} / ${settings.totalCycles}차</span></div>
+      <div class="setting-row"><span class="setting-name">${cycle}차 시작일</span><span class="setting-value">${formatDate(dates[cycle-1])}</span></div>
+      <div class="setting-row"><span class="setting-name">${cycle}차 시작한지</span><span class="setting-value">${dayInCycle}일째</span></div>
+      <div class="setting-row"><span class="setting-name">다음 사이클</span><span class="setting-value">${nextInfo}</span></div>
+      <div class="setting-row"><span class="setting-name">전체 진행률</span><span class="setting-value">${cycle} / ${totalCycles}차</span></div>
       <div class="cycle-progress" style="margin-top:16px">
-        <div class="progress-header"><span>전체 치료 완료율</span><span>${Math.round((cycle-1)/settings.totalCycles*100)}%</span></div>
-        <div class="progress-track"><div class="progress-fill" style="width:${Math.round((cycle-1)/settings.totalCycles*100)}%;background:linear-gradient(90deg,var(--sage),var(--terracotta))"></div></div>
+        <div class="progress-header"><span>전체 치료 완료율</span><span>${completePct}%</span></div>
+        <div class="progress-track"><div class="progress-fill" style="width:${completePct}%;background:linear-gradient(90deg,var(--sage),var(--terracotta))"></div></div>
       </div>`;
   }
 
